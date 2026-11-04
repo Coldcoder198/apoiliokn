@@ -1,0 +1,1329 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>WWII Artillery Commander 3D</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Three.js Library -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <style>
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: #1a232a;
+            font-family: 'Courier New', Courier, monospace;
+            user-select: none;
+        }
+
+        #canvas-container {
+            width: 100%;
+            height: 100%;
+            position: absolute;
+            top: 0;
+            left: 0;
+            z-index: 1;
+        }
+
+        /* Scope overlay effect */
+        .scope-overlay {
+            pointer-events: none;
+            box-shadow: inset 0 0 120px rgba(0, 0, 0, 0.9);
+            background: radial-gradient(circle at center, transparent 40%, rgba(10, 20, 10, 0.75) 60%, rgba(0,0,0,0.98) 88%);
+        }
+
+        /* Reticle lines */
+        .reticle-v { position: absolute; left: 50%; top: 5%; bottom: 5%; width: 2px; background: rgba(0, 255, 100, 0.75); transform: translateX(-50%); }
+        .reticle-h { position: absolute; top: 50%; left: 5%; right: 5%; height: 2px; background: rgba(0, 255, 100, 0.75); transform: translateY(-50%); }
+        .reticle-circle { position: absolute; top: 50%; left: 50%; width: 280px; height: 280px; border: 2px solid rgba(0, 255, 100, 0.65); border-radius: 50%; transform: translate(-50%, -50%); }
+
+        .btn-action {
+            background: linear-gradient(180deg, #374151 0%, #1f2937 100%);
+            border: 1px solid #4b5563;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.5);
+            transition: all 0.15s ease;
+        }
+        .btn-action:hover:not(:disabled) {
+            background: linear-gradient(180deg, #4b5563 0%, #374151 100%);
+            border-color: #9ca3af;
+        }
+        .btn-action:active:not(:disabled) {
+            transform: translateY(2px);
+        }
+
+        .btn-fire {
+            background: linear-gradient(180deg, #dc2626 0%, #991b1b 100%);
+            border: 2px solid #f87171;
+            text-shadow: 0 2px 4px rgba(0,0,0,0.8);
+        }
+        .btn-fire:hover:not(:disabled) {
+            background: linear-gradient(180deg, #ef4444 0%, #b91c1c 100%);
+            box-shadow: 0 0 15px rgba(220, 38, 38, 0.6);
+        }
+    </style>
+</head>
+<body class="text-gray-200">
+
+    <div id="canvas-container"></div>
+
+    <!-- MAIN UI OVERLAY -->
+    <div class="relative z-10 w-full h-full flex flex-col justify-between p-4 pointer-events-none select-none">
+        
+        <!-- TOP HUD BAR -->
+        <div class="flex justify-between items-start w-full gap-4">
+            <!-- Mission Objectives & Status -->
+            <div class="bg-gray-900/90 backdrop-blur-md p-4 rounded-xl border border-gray-700/60 shadow-2xl max-w-md pointer-events-auto">
+                <div class="flex justify-between items-center mb-1">
+                    <span id="level-title" class="text-amber-500 font-bold uppercase tracking-wider text-sm">LEVEL 1: HOLD THE LINE</span>
+                    <span id="game-time" class="text-xs bg-gray-800 text-gray-300 px-2 py-0.5 rounded border border-gray-700">03:00</span>
+                </div>
+                <p id="level-desc" class="text-xs text-gray-300 mb-3 leading-relaxed">Destroy enemy trench posts downrange. Keep an eye out for friendly troops advancing in front trenches!</p>
+                
+                <div class="space-y-1.5 text-xs">
+                    <div class="flex justify-between text-gray-400">
+                        <span>Targets Remaining:</span>
+                        <span id="targets-count" class="font-bold text-red-400">0 / 5</span>
+                    </div>
+                    <div class="w-full bg-gray-800 rounded-full h-2 overflow-hidden border border-gray-700">
+                        <div id="target-progress" class="bg-red-600 h-full transition-all duration-300" style="width: 0%"></div>
+                    </div>
+                    <div class="flex justify-between text-gray-400 pt-1">
+                        <span>Friendly Casualties:</span>
+                        <span id="friendly-cas" class="font-bold text-emerald-400">0</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Compass & Wind HUD -->
+            <div class="flex flex-col items-center gap-2 pointer-events-auto">
+                <!-- Compass -->
+                <div class="bg-gray-900/90 backdrop-blur-md px-4 py-2 rounded-xl border border-gray-700/60 shadow-xl w-64 text-center">
+                    <div class="text-[10px] text-gray-400 uppercase tracking-widest mb-1">AZIMUTH BEARING</div>
+                    <div class="relative w-full h-6 overflow-hidden rounded bg-gray-950/80 border border-gray-800 flex items-center justify-center">
+                        <div id="compass-tape" class="text-amber-400 font-mono text-sm font-bold tracking-widest">000° N</div>
+                        <div class="absolute top-0 bottom-0 left-1/2 w-0.5 bg-red-500 -translate-x-1/2"></div>
+                    </div>
+                </div>
+
+                <!-- Wind Indicator -->
+                <div class="bg-gray-900/90 backdrop-blur-md px-4 py-2 rounded-xl border border-gray-700/60 shadow-xl w-64 flex justify-between items-center text-xs">
+                    <span class="text-gray-400 font-semibold">CROSSWIND:</span>
+                    <div class="flex items-center gap-2">
+                        <span id="wind-dir" class="text-amber-400 font-bold">WEST 3 mph</span>
+                        <div id="wind-arrow" class="text-amber-400 text-sm transform transition-transform">←</div>
+                    </div>
+                </div>
+
+                <!-- Map Selector Bar -->
+                <div class="bg-gray-900/90 backdrop-blur-md px-3 py-1.5 rounded-xl border border-gray-700/60 shadow-xl flex gap-1">
+                    <button class="btn-map btn-action px-2 py-1 rounded text-[10px] font-bold text-amber-400 border-amber-500" data-map="somme">SOMME MUD</button>
+                    <button class="btn-map btn-action px-2 py-1 rounded text-[10px] font-bold text-gray-300 border-gray-600" data-map="ardennes">ARDENNES SNOW</button>
+                    <button class="btn-map btn-action px-2 py-1 rounded text-[10px] font-bold text-gray-300 border-gray-600" data-map="desert">SAHARA DESERT</button>
+                </div>
+            </div>
+
+            <!-- Score & Controls Help toggle -->
+            <div class="bg-gray-900/90 backdrop-blur-md p-3 rounded-xl border border-gray-700/60 shadow-xl pointer-events-auto text-right min-w-[160px]">
+                <div class="text-[10px] text-gray-400 uppercase tracking-widest">SCORE</div>
+                <div id="score-display" class="text-2xl font-black text-amber-500 font-mono">0000</div>
+                <button id="btn-toggle-cam" class="mt-2 w-full text-[11px] btn-action px-2 py-1 rounded text-gray-300 font-bold flex items-center justify-center gap-1">
+                    <span>📹 CAM (C): <span id="cam-mode-text" class="text-amber-400">GUNNER</span></span>
+                </button>
+            </div>
+        </div>
+
+        <!-- CENTER RETICLE / SCOPE (Shown in Optics mode) -->
+        <div id="scope-overlay" class="absolute inset-0 scope-overlay opacity-0 transition-opacity duration-300 pointer-events-none">
+            <div class="reticle-v"></div>
+            <div class="reticle-h"></div>
+            <div class="reticle-circle"></div>
+            <div class="absolute left-[53%] top-[35%] text-xs text-green-400 font-mono space-y-4 select-none">
+                <div>— 100m</div><div>— 250m</div><div>— 500m</div><div>— 800m</div>
+            </div>
+        </div>
+
+        <!-- BOTTOM CONTROL PANEL -->
+        <div class="flex flex-col md:flex-row justify-between items-end gap-4 w-full pointer-events-auto">
+            
+            <!-- Gun Readouts & Aiming Controls -->
+            <div class="bg-gray-900/90 backdrop-blur-md p-4 rounded-2xl border border-gray-700/70 shadow-2xl flex flex-wrap gap-4 items-center">
+                
+                <!-- Elevation Readout & Sliders -->
+                <div class="flex flex-col gap-1 min-w-[120px]">
+                    <div class="flex justify-between items-center text-xs">
+                        <span class="text-gray-400">ELEVATION (W/S):</span>
+                        <span id="readout-elevation" class="text-amber-400 font-mono font-bold">25.0°</span>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <button id="btn-elev-down" class="btn-action w-8 h-8 rounded-lg font-bold text-gray-200">-</button>
+                        <input id="slider-elevation" type="range" min="5" max="75" step="0.5" value="25" class="w-28 accent-amber-500 cursor-pointer">
+                        <button id="btn-elev-up" class="btn-action w-8 h-8 rounded-lg font-bold text-gray-200">+</button>
+                    </div>
+                </div>
+
+                <div class="h-10 w-[1px] bg-gray-700/60 hidden sm:block"></div>
+
+                <!-- Azimuth Readout & Sliders -->
+                <div class="flex flex-col gap-1 min-w-[120px]">
+                    <div class="flex justify-between items-center text-xs">
+                        <span class="text-gray-400">TRAVERSE (A/D):</span>
+                        <span id="readout-azimuth" class="text-amber-400 font-mono font-bold">0.0°</span>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <button id="btn-az-left" class="btn-action w-8 h-8 rounded-lg font-bold text-gray-200">◀</button>
+                        <input id="slider-azimuth" type="range" min="-45" max="45" step="0.5" value="0" class="w-28 accent-amber-500 cursor-pointer">
+                        <button id="btn-az-right" class="btn-action w-8 h-8 rounded-lg font-bold text-gray-200">▶</button>
+                    </div>
+                </div>
+
+                <div class="h-10 w-[1px] bg-gray-700/60 hidden sm:block"></div>
+
+                <!-- Powder Charge Selector -->
+                <div class="flex flex-col gap-1">
+                    <span class="text-[10px] text-gray-400 uppercase tracking-wider">POWDER CHARGE</span>
+                    <div class="flex gap-1">
+                        <button class="btn-charge btn-action px-3 py-1.5 rounded-lg text-xs font-bold text-gray-300 border-amber-500/50" data-charge="1">CHG 1</button>
+                        <button class="btn-charge btn-action px-3 py-1.5 rounded-lg text-xs font-bold text-amber-400 border-amber-500" data-charge="2">CHG 2</button>
+                        <button class="btn-charge btn-action px-3 py-1.5 rounded-lg text-xs font-bold text-gray-300 border-amber-500/50" data-charge="3">CHG 3</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Shell Selector & FIRE Button -->
+            <div class="bg-gray-900/90 backdrop-blur-md p-4 rounded-2xl border border-gray-700/70 shadow-2xl flex items-center gap-4">
+                
+                <!-- Ammo Selection -->
+                <div class="flex flex-col gap-1">
+                    <span class="text-[10px] text-gray-400 uppercase tracking-wider">SHELL TYPE</span>
+                    <div class="flex gap-1">
+                        <button class="btn-shell btn-action px-3 py-2 rounded-lg text-xs font-bold text-amber-400 border-amber-500 flex flex-col items-center" data-type="HE">
+                            <span>HE</span>
+                            <span class="text-[9px] text-gray-400 font-normal">Explosive</span>
+                        </button>
+                        <button class="btn-shell btn-action px-3 py-2 rounded-lg text-xs font-bold text-gray-300 border-gray-600 flex flex-col items-center" data-type="SMOKE">
+                            <span>SMK</span>
+                            <span class="text-[9px] text-gray-400 font-normal">Smoke</span>
+                        </button>
+                        <button class="btn-shell btn-action px-3 py-2 rounded-lg text-xs font-bold text-gray-300 border-gray-600 flex flex-col items-center" data-type="AP">
+                            <span>AP</span>
+                            <span class="text-[9px] text-gray-400 font-normal">Bunker</span>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Reload & Fire Button -->
+                <div class="flex flex-col items-center gap-1">
+                    <!-- Reload Progress Bar -->
+                    <div class="w-full bg-gray-950 rounded-full h-2 overflow-hidden border border-gray-800">
+                        <div id="reload-bar" class="bg-amber-500 h-full w-full transition-all duration-75"></div>
+                    </div>
+                    <button id="btn-fire" class="btn-fire px-8 py-3 rounded-xl font-black text-lg text-white tracking-widest uppercase shadow-lg active:scale-95 transition-all">
+                        FIRE (SPACE)
+                    </button>
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <!-- START / GAMEOVER / LEVEL CLEAR MODAL OVERLAY -->
+    <div id="modal-overlay" class="absolute inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-4">
+        <div class="bg-gray-900 border-2 border-amber-600/60 rounded-2xl max-w-lg w-full p-6 text-center shadow-2xl relative overflow-hidden">
+            <h1 id="modal-title" class="text-3xl font-black text-amber-500 tracking-wider uppercase mb-2">WWII ARTILLERY COMMANDER</h1>
+            <p id="modal-subtitle" class="text-xs text-amber-300/80 font-mono mb-4">HEAVY HOWITZER BATTERY COMMAND</p>
+
+            <div id="modal-body" class="text-sm text-gray-300 mb-6 space-y-3 text-left bg-gray-950/60 p-4 rounded-xl border border-gray-800 font-sans">
+                <p>Commander, take command of the 105mm Howitzer battery facing the fortified enemy line.</p>
+                <p class="text-amber-400/90 font-semibold">Features & Controls:</p>
+                <ul class="list-disc list-inside space-y-1 text-xs text-gray-400">
+                    <li><span class="text-amber-300">W / S</span> or Sliders : Elevate Gun (Pitch)</li>
+                    <li><span class="text-amber-300">A / D</span> or Sliders : Traverse Cannon (Yaw)</li>
+                    <li><span class="text-amber-300">SPACEBAR</span> or Fire Button : Pull Lanyard / Shoot</li>
+                    <li><span class="text-amber-300">V</span> : Toggle Optical Reticle Sight</li>
+                    <li><span class="text-amber-300">C</span> : Toggle Shell Tracer Camera</li>
+                    <li><span class="text-amber-300">MAP SELECTOR</span> : Switch between Mud, Snow & Desert battlefields</li>
+                    <li>Watch out for friendly infantry, active trench diggers, and flying enemy tracer rounds downrange!</li>
+                </ul>
+            </div>
+
+            <button id="btn-modal-action" class="w-full btn-fire py-3 rounded-xl text-white font-bold tracking-widest text-base uppercase shadow-xl hover:brightness-110">
+                COMMENCE BATTALION ASSAULT
+            </button>
+        </div>
+    </div>
+
+    <script>
+        // ==========================================
+        // GAME STATE & CONFIGURATION
+        // ==========================================
+        const CONFIG = {
+            gravity: 9.81,
+            maxElevation: 75,
+            minElevation: 5,
+            maxAzimuth: 45,
+            minAzimuth: -45,
+            reloadTime: 2.5
+        };
+
+        const MAP_THEMES = {
+            somme: {
+                name: "Somme Mudlands",
+                skyColor: 0x6e828a,
+                fogColor: 0x7a8c94,
+                fogDensity: 0.0012,
+                terrainColor: '#4d5e38',
+                dirtColor: '#5c4832',
+                bunkerColor: 0x5a5f66,
+                precipType: 'rain'
+            },
+            ardennes: {
+                name: "Ardennes Snowfield",
+                skyColor: 0xd8e8f0,
+                fogColor: 0xcfe0e8,
+                fogDensity: 0.0010,
+                terrainColor: '#e0e8ed',
+                dirtColor: '#8a837b',
+                bunkerColor: 0x78808a,
+                precipType: 'snow'
+            },
+            desert: {
+                name: "Sahara Desert",
+                skyColor: 0xd9bb84,
+                fogColor: 0xc4a46e,
+                fogDensity: 0.0009,
+                terrainColor: '#c29d5b',
+                dirtColor: '#8c6832',
+                bunkerColor: 0x877254,
+                precipType: 'sand'
+            }
+        };
+
+        const STATE = {
+            level: 1,
+            selectedMap: 'somme',
+            score: 0,
+            targetsRemaining: 0,
+            totalTargets: 0,
+            friendlyCasualties: 0,
+            elevation: 25.0,
+            azimuth: 0.0,
+            powderCharge: 2,
+            shellType: 'HE',
+            reloading: false,
+            reloadProgress: 1.0,
+            cameraMode: 'GUNNER', // GUNNER, OPTICS, SHELL
+            wind: { speed: 3, angle: Math.PI },
+            activeShell: null,
+            timeRemaining: 180,
+            gameActive: false
+        };
+
+        const LEVELS = [
+            { id: 1, title: "LEVEL 1: HOLD THE LINE", desc: "Neutralize 5 enemy trench posts downrange. Watch for friendly troops advancing and engineers digging!", time: 180, targetsCount: 5, friendliesCount: 5, windSpeed: 3 },
+            { id: 2, title: "LEVEL 2: COUNTER-BATTERY", desc: "Enemy heavy mortars are shelling our sector. Destroy 7 fortified bunkers under moderate crosswind!", time: 150, targetsCount: 7, friendliesCount: 6, windSpeed: 7 },
+            { id: 3, title: "LEVEL 3: OVERLORD OFFENSIVE", desc: "Final assault! Neutralize 9 enemy pillboxes intertwined with friendly shock troops in heavy wind!", time: 120, targetsCount: 9, friendliesCount: 7, windSpeed: 12 }
+        ];
+
+        // ==========================================
+        // AUDIO SYNTHESIZER
+        // ==========================================
+        class SoundEngine {
+            constructor() { this.ctx = null; }
+            init() { if (!this.ctx) this.ctx = new (window.AudioContext || window.webkitAudioContext)(); }
+            
+            playCannonFire() {
+                if (!this.ctx) return;
+                const now = this.ctx.currentTime;
+
+                // Deep Boom
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = 'triangle';
+                osc.frequency.setValueAtTime(140, now);
+                osc.frequency.exponentialRampToValueAtTime(25, now + 0.9);
+                gain.gain.setValueAtTime(1.0, now);
+                gain.gain.exponentialRampToValueAtTime(0.01, now + 0.9);
+                osc.connect(gain); gain.connect(this.ctx.destination);
+                osc.start(now); osc.stop(now + 0.9);
+
+                // Blast Noise
+                const bufferSize = this.ctx.sampleRate * 0.6;
+                const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+                const data = buffer.getChannelData(0);
+                for (let i = 0; i < bufferSize; i++) data[i] = Math.random() * 2 - 1;
+
+                const noise = this.ctx.createBufferSource();
+                noise.buffer = buffer;
+                const filter = this.ctx.createBiquadFilter();
+                filter.type = 'lowpass';
+                filter.frequency.setValueAtTime(900, now);
+                filter.frequency.linearRampToValueAtTime(120, now + 0.6);
+
+                const nGain = this.ctx.createGain();
+                nGain.gain.setValueAtTime(0.9, now);
+                nGain.gain.exponentialRampToValueAtTime(0.01, now + 0.6);
+
+                noise.connect(filter); filter.connect(nGain); nGain.connect(this.ctx.destination);
+                noise.start(now);
+            }
+
+            playExplosion() {
+                if (!this.ctx) return;
+                const now = this.ctx.currentTime;
+                const bufferSize = this.ctx.sampleRate * 1.2;
+                const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+                const data = buffer.getChannelData(0);
+                for (let i = 0; i < bufferSize; i++) data[i] = Math.random() * 2 - 1;
+
+                const noise = this.ctx.createBufferSource();
+                noise.buffer = buffer;
+                const filter = this.ctx.createBiquadFilter();
+                filter.type = 'lowpass';
+                filter.frequency.setValueAtTime(500, now);
+                filter.frequency.exponentialRampToValueAtTime(30, now + 1.2);
+
+                const gain = this.ctx.createGain();
+                gain.gain.setValueAtTime(0.8, now);
+                gain.gain.exponentialRampToValueAtTime(0.01, now + 1.2);
+
+                noise.connect(filter); filter.connect(gain); gain.connect(this.ctx.destination);
+                noise.start(now);
+            }
+
+            playRifleShot() {
+                if (!this.ctx) return;
+                const now = this.ctx.currentTime;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = 'sawtooth';
+                osc.frequency.setValueAtTime(450, now);
+                osc.frequency.exponentialRampToValueAtTime(80, now + 0.12);
+                gain.gain.setValueAtTime(0.15, now);
+                gain.gain.exponentialRampToValueAtTime(0.001, now + 0.12);
+                osc.connect(gain); gain.connect(this.ctx.destination);
+                osc.start(now); osc.stop(now + 0.12);
+            }
+
+            playClick() {
+                if (!this.ctx) return;
+                const now = this.ctx.currentTime;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(700, now);
+                osc.frequency.exponentialRampToValueAtTime(150, now + 0.05);
+                gain.gain.setValueAtTime(0.2, now);
+                gain.gain.linearRampToValueAtTime(0.01, now + 0.05);
+                osc.connect(gain); gain.connect(this.ctx.destination);
+                osc.start(now); osc.stop(now + 0.05);
+            }
+        }
+        const audio = new SoundEngine();
+
+        // ==========================================
+        // THREE.JS SCENE CREATION
+        // ==========================================
+        let scene, camera, renderer;
+        let cannonGroup, barrelGroup, recoilGroup;
+        let cameraGunnerPos, cameraOpticsPos;
+        let terrainMesh = null;
+        let targets = [];
+        let friendlySoldiers = [];
+        let enemySoldiers = [];
+        let sappers = [];
+        let bulletTracers = [];
+        let particleSystems = [];
+        let weatherParticles = null;
+        let weatherPositions = [];
+
+        function initThreeJS() {
+            const container = document.getElementById('canvas-container');
+
+            scene = new THREE.Scene();
+            camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 3000);
+
+            renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, powerPreference: "high-performance" });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+            renderer.shadowMap.enabled = true;
+            renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+            container.appendChild(renderer.domElement);
+
+            // Lighting Setup
+            const hemiLight = new THREE.HemisphereLight(0xffffff, 0x444455, 1.2);
+            hemiLight.position.set(0, 500, 0);
+            scene.add(hemiLight);
+
+            const sunLight = new THREE.DirectionalLight(0xfff5ea, 1.5);
+            sunLight.position.set(150, 350, 200);
+            sunLight.castShadow = true;
+            sunLight.shadow.mapSize.width = 1024;
+            sunLight.shadow.mapSize.height = 1024;
+            sunLight.shadow.camera.near = 10;
+            sunLight.shadow.camera.far = 1000;
+            const d = 300;
+            sunLight.shadow.camera.left = -d;
+            sunLight.shadow.camera.right = d;
+            sunLight.shadow.camera.top = d;
+            sunLight.shadow.camera.bottom = -d;
+            scene.add(sunLight);
+
+            createArtilleryCannon();
+            applyMapTheme(STATE.selectedMap);
+
+            window.addEventListener('resize', onWindowResize);
+        }
+
+        // Apply Map Theme (Somme, Ardennes, Sahara)
+        function applyMapTheme(mapId) {
+            const theme = MAP_THEMES[mapId] || MAP_THEMES.somme;
+            STATE.selectedMap = mapId;
+
+            scene.background = new THREE.Color(theme.skyColor);
+            scene.fog = new THREE.FogExp2(theme.fogColor, theme.fogDensity);
+
+            if (terrainMesh) scene.remove(terrainMesh);
+            createTerrain(theme);
+            createWeatherParticles(theme);
+        }
+
+        function createWeatherParticles(theme) {
+            if (weatherParticles) scene.remove(weatherParticles);
+
+            const count = 1200;
+            const geo = new THREE.BufferGeometry();
+            weatherPositions = [];
+
+            for (let i = 0; i < count; i++) {
+                weatherPositions.push(
+                    (Math.random() - 0.5) * 600,
+                    Math.random() * 80 + 2,
+                    -Math.random() * 800
+                );
+            }
+
+            geo.setAttribute('position', new THREE.Float32BufferAttribute(weatherPositions, 3));
+            let color = 0xaaaaaa;
+            let size = 0.8;
+            if (theme.precipType === 'snow') { color = 0xffffff; size = 1.2; }
+            else if (theme.precipType === 'sand') { color = 0xdfb470; size = 1.0; }
+
+            const mat = new THREE.PointsMaterial({ color: color, size: size, transparent: true, opacity: 0.65 });
+            weatherParticles = new THREE.Points(geo, mat);
+            scene.add(weatherParticles);
+        }
+
+        function updateWeather(dt) {
+            if (!weatherParticles) return;
+            const posAttr = weatherParticles.geometry.attributes.position;
+            const theme = MAP_THEMES[STATE.selectedMap];
+
+            for (let i = 0; i < posAttr.count; i++) {
+                let px = posAttr.getX(i);
+                let py = posAttr.getY(i);
+                let pz = posAttr.getZ(i);
+
+                if (theme.precipType === 'rain') { py -= 40 * dt; px -= 3 * dt; }
+                else if (theme.precipType === 'snow') { py -= 8 * dt; px += Math.sin(py * 0.1) * dt * 2; }
+                else if (theme.precipType === 'sand') { px -= 25 * dt; py -= 3 * dt; }
+
+                if (py < 0) py = 80;
+                if (px < -300) px = 300;
+                if (px > 300) px = -300;
+
+                posAttr.setXYZ(i, px, py, pz);
+            }
+            posAttr.needsUpdate = true;
+        }
+
+        // Procedural Terrain & Trench Network downrange towards -Z
+        function createTerrain(theme) {
+            const size = 1500;
+            const segments = 120;
+            const geometry = new THREE.PlaneGeometry(size, size, segments, segments);
+            geometry.rotateX(-Math.PI / 2);
+
+            const pos = geometry.attributes.position;
+            for (let i = 0; i < pos.count; i++) {
+                const x = pos.getX(i);
+                const z = pos.getZ(i);
+
+                let y = Math.sin(x * 0.005) * Math.cos(z * 0.005) * 8.0;
+
+                // Enemy trench zone downrange (Z = -250 to -900)
+                if (z < -250 && z > -900 && Math.abs(x) < 400) {
+                    const trenchZigZag = Math.sin(x * 0.05) * 20 + Math.sin(z * 0.03) * 15;
+                    if (Math.abs((x % 80) - trenchZigZag) < 8) {
+                        y -= 6.0; // Deep trench cuts
+                    }
+                }
+                // Friendly front trench (Z = -100 to -160)
+                if (z < -100 && z > -160 && Math.abs(x) < 300) {
+                    y -= 4.5;
+                }
+
+                pos.setY(i, y);
+            }
+            geometry.computeVertexNormals();
+
+            // Procedural Canvas Texture
+            const canvas = document.createElement('canvas');
+            canvas.width = 256; canvas.height = 256;
+            const ctx = canvas.getContext('2d');
+            ctx.fillStyle = theme.terrainColor; ctx.fillRect(0, 0, 256, 256);
+            for (let i = 0; i < 5000; i++) {
+                ctx.fillStyle = Math.random() > 0.5 ? theme.dirtColor : theme.terrainColor;
+                ctx.fillRect(Math.random() * 256, Math.random() * 256, 2, 2);
+            }
+            const groundTex = new THREE.CanvasTexture(canvas);
+            groundTex.wrapS = THREE.RepeatWrapping;
+            groundTex.wrapT = THREE.RepeatWrapping;
+            groundTex.repeat.set(50, 50);
+
+            const mat = new THREE.MeshStandardMaterial({ map: groundTex, roughness: 0.85 });
+            terrainMesh = new THREE.Mesh(geometry, mat);
+            terrainMesh.receiveShadow = true;
+            scene.add(terrainMesh);
+        }
+
+        // 3D Howitzer Cannon Model correctly placed at origin (0,0,0) pointing towards negative Z
+        function createArtilleryCannon() {
+            cannonGroup = new THREE.Group();
+            cannonGroup.position.set(0, 0, 0);
+
+            const darkMetalMat = new THREE.MeshStandardMaterial({ color: 0x2d332d, roughness: 0.5, metalness: 0.6 });
+            const gunMetalMat = new THREE.MeshStandardMaterial({ color: 0x424a42, roughness: 0.4, metalness: 0.7 });
+            const brassMat = new THREE.MeshStandardMaterial({ color: 0xc49a2a, roughness: 0.3, metalness: 0.8 });
+
+            // Base Carriage
+            const carriage = new THREE.Mesh(new THREE.BoxGeometry(2.8, 0.8, 3.5), darkMetalMat);
+            carriage.position.set(0, 0.4, 0);
+            cannonGroup.add(carriage);
+
+            // Blast Shield behind pivot (to avoid obstructing forward views)
+            const shield = new THREE.Mesh(new THREE.BoxGeometry(4.2, 1.2, 0.15), gunMetalMat);
+            shield.position.set(0, 0.9, 0.8);
+            cannonGroup.add(shield);
+
+            // Wheels
+            const wheelGeo = new THREE.CylinderGeometry(1.4, 1.4, 0.35, 16);
+            wheelGeo.rotateZ(Math.PI / 2);
+            const wL = new THREE.Mesh(wheelGeo, darkMetalMat); wL.position.set(-1.8, 1.4, 0);
+            const wR = new THREE.Mesh(wheelGeo, darkMetalMat); wR.position.set(1.8, 1.4, 0);
+            cannonGroup.add(wL); cannonGroup.add(wR);
+
+            // Pivot Group
+            barrelGroup = new THREE.Group();
+            barrelGroup.position.set(0, 1.5, 0);
+
+            recoilGroup = new THREE.Group();
+
+            // Long Barrel extending forward TOWARDS NEGATIVE Z
+            const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.26, 9.0, 16), gunMetalMat);
+            barrel.geometry.rotateX(-Math.PI / 2);
+            barrel.geometry.translate(0, 0, -4.5);
+            recoilGroup.add(barrel);
+
+            // Muzzle Ring at tip (-9.0 z)
+            const muzzle = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.28, 0.8, 12), darkMetalMat);
+            muzzle.geometry.rotateX(-Math.PI / 2);
+            muzzle.geometry.translate(0, 0, -9.0);
+            recoilGroup.add(muzzle);
+
+            // Breech Block behind barrel
+            const breach = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.7, 1.0), darkMetalMat);
+            breach.position.set(0, 0, 0.5);
+            recoilGroup.add(breach);
+
+            // Optical Scope Mount offset on side
+            const scope = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 0.8, 12), brassMat);
+            scope.geometry.rotateX(-Math.PI / 2);
+            scope.position.set(-0.6, 0.45, -0.2);
+            recoilGroup.add(scope);
+
+            barrelGroup.add(recoilGroup);
+            cannonGroup.add(barrelGroup);
+            scene.add(cannonGroup);
+
+            // Elevated camera vectors looking downrange TOWARDS NEGATIVE Z
+            cameraGunnerPos = new THREE.Vector3(0, 4.5, -1.0);
+            cameraOpticsPos = new THREE.Vector3(-0.6, 1.95, -0.2);
+
+            camera.position.copy(cameraGunnerPos);
+            camera.lookAt(0, 2.0, -100);
+        }
+
+        // Low-Poly 3D Soldier Model Generator (Support Sapper/Diggers with Shovels)
+        function create3DSoldierMesh(isFriendly, isSapper = false) {
+            const group = new THREE.Group();
+            const skinMat = new THREE.MeshStandardMaterial({ color: 0xd2a679 });
+            const uniformMat = new THREE.MeshStandardMaterial({ color: isFriendly ? 0x2b5278 : 0x822a2a });
+            const helmetMat = new THREE.MeshStandardMaterial({ color: isFriendly ? 0x3d6b99 : 0xb83232, roughness: 0.3 });
+
+            // Torso
+            const torso = new THREE.Mesh(new THREE.BoxGeometry(0.7, 1.0, 0.5), uniformMat);
+            torso.position.y = 1.1;
+            group.add(torso);
+
+            // Head & Helmet
+            const head = new THREE.Mesh(new THREE.SphereGeometry(0.22, 8, 8), skinMat);
+            head.position.y = 1.75;
+            group.add(head);
+
+            const helmet = new THREE.Mesh(new THREE.SphereGeometry(0.26, 8, 8), helmetMat);
+            helmet.position.y = 1.82;
+            helmet.scale.set(1.15, 0.75, 1.15);
+            group.add(helmet);
+
+            if (isSapper) {
+                // Shovel Mesh
+                const shovelGroup = new THREE.Group();
+                const handle = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 1.2), new THREE.MeshStandardMaterial({ color: 0x8b5a2b }));
+                const blade = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.3, 0.03), new THREE.MeshStandardMaterial({ color: 0x555555, metalness: 0.8 }));
+                blade.position.y = -0.6;
+                shovelGroup.add(handle); shovelGroup.add(blade);
+                shovelGroup.position.set(0.35, 1.1, -0.3);
+                shovelGroup.rotation.x = 0.5;
+                group.add(shovelGroup);
+                group.shovel = shovelGroup;
+            } else {
+                // Rifle
+                const rifle = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.1, 1.2), new THREE.MeshStandardMaterial({ color: 0x111111 }));
+                rifle.position.set(0.3, 1.25, -0.3);
+                rifle.rotation.x = -0.2;
+                group.add(rifle);
+            }
+
+            return group;
+        }
+
+        // ==========================================
+        // LEVEL SPANNING & OBJECTIVES
+        // ==========================================
+        function setupLevel(levelNum) {
+            const lvl = LEVELS[levelNum - 1];
+            STATE.level = lvl.id;
+            STATE.timeRemaining = lvl.time;
+            STATE.wind.speed = lvl.windSpeed;
+            STATE.wind.angle = (Math.random() - 0.5) * Math.PI;
+
+            // Clear entities
+            targets.forEach(t => scene.remove(t.mesh));
+            friendlySoldiers.forEach(f => scene.remove(f.mesh));
+            enemySoldiers.forEach(e => scene.remove(e.mesh));
+            sappers.forEach(s => scene.remove(s.mesh));
+            bulletTracers.forEach(b => scene.remove(b.mesh));
+            targets = []; friendlySoldiers = []; enemySoldiers = []; sappers = []; bulletTracers = [];
+
+            STATE.targetsRemaining = lvl.targetsCount;
+            STATE.totalTargets = lvl.targetsCount;
+
+            const theme = MAP_THEMES[STATE.selectedMap];
+            const bunkerMat = new THREE.MeshStandardMaterial({ color: theme.bunkerColor, roughness: 0.7 });
+
+            // Spawn Enemy Bunkers/Posts downrange (Z = -300 to -800)
+            for (let i = 0; i < lvl.targetsCount; i++) {
+                const bunkerGroup = new THREE.Group();
+                const mainBunker = new THREE.Mesh(new THREE.BoxGeometry(8, 3.5, 6), bunkerMat);
+                mainBunker.position.y = 1.75;
+                bunkerGroup.add(mainBunker);
+
+                // Slit Window
+                const slit = new THREE.Mesh(new THREE.BoxGeometry(4.0, 0.5, 6.2), new THREE.MeshBasicMaterial({ color: 0x050505 }));
+                slit.position.set(0, 2.0, 0);
+                bunkerGroup.add(slit);
+
+                const rx = (Math.random() - 0.5) * 320;
+                const rz = -300 - (i * 50) - Math.random() * 40;
+                const ry = getTerrainHeight(rx, rz);
+
+                bunkerGroup.position.set(rx, ry, rz);
+                scene.add(bunkerGroup);
+
+                targets.push({ mesh: bunkerGroup, hp: 2, radius: 5.0, destroyed: false });
+            }
+
+            // Spawn 3D Friendly Infantry in front trench (Z = -110 to -160)
+            for (let i = 0; i < lvl.friendliesCount; i++) {
+                const soldier = create3DSoldierMesh(true, false);
+                const fx = (Math.random() - 0.5) * 220;
+                const fz = -110 - Math.random() * 40;
+                const fy = getTerrainHeight(fx, fz);
+
+                soldier.position.set(fx, fy, fz);
+                scene.add(soldier);
+
+                friendlySoldiers.push({ mesh: soldier, alive: true, radius: 2.5, fireTimer: Math.random() * 3 });
+            }
+
+            // Spawn Active Trench Digging Sappers in forward trench
+            for (let i = 0; i < 4; i++) {
+                const sapper = create3DSoldierMesh(true, true);
+                const sx = -120 + i * 60 + (Math.random() - 0.5) * 20;
+                const sz = -125 - Math.random() * 15;
+                const sy = getTerrainHeight(sx, sz);
+
+                sapper.position.set(sx, sy, sz);
+                scene.add(sapper);
+
+                sappers.push({ mesh: sapper, digCycle: Math.random() * Math.PI * 2, baseY: sy });
+            }
+
+            // Spawn 3D Enemy Infantry downrange (Z = -280 to -700)
+            for (let i = 0; i < 14; i++) {
+                const soldier = create3DSoldierMesh(false, false);
+                const ex = (Math.random() - 0.5) * 340;
+                const ez = -280 - Math.random() * 400;
+                const ey = getTerrainHeight(ex, ez);
+
+                soldier.position.set(ex, ey, ez);
+                scene.add(soldier);
+
+                enemySoldiers.push({ mesh: soldier, alive: true, baseY: ey, popTimer: Math.random() * 5, fireTimer: Math.random() * 4 });
+            }
+
+            updateHUD();
+        }
+
+        function getTerrainHeight(x, z) {
+            let y = Math.sin(x * 0.005) * Math.cos(z * 0.005) * 8.0;
+            if (z < -250 && z > -900 && Math.abs(x) < 400) {
+                const trenchZigZag = Math.sin(x * 0.05) * 20 + Math.sin(z * 0.03) * 15;
+                if (Math.abs((x % 80) - trenchZigZag) < 8) y -= 6.0;
+            }
+            if (z < -100 && z > -160 && Math.abs(x) < 300) y -= 4.5;
+            return y;
+        }
+
+        // Dynamic Infantry Firefight & Bullet Tracers
+        function spawnBulletTracer(fromPos, toPos, isEnemy) {
+            const geo = new THREE.BufferGeometry();
+            const positions = new Float32Array([
+                fromPos.x, fromPos.y + 1.2, fromPos.z,
+                fromPos.x, fromPos.y + 1.2, fromPos.z
+            ]);
+            geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+
+            const color = isEnemy ? 0xff3300 : 0xffff00;
+            const mat = new THREE.LineBasicMaterial({ color: color, linewidth: 2 });
+            const line = new THREE.Line(geo, mat);
+            scene.add(line);
+
+            bulletTracers.push({
+                mesh: line,
+                from: fromPos.clone().add(new THREE.Vector3(0, 1.2, 0)),
+                to: toPos.clone().add(new THREE.Vector3(0, 1.0, 0)),
+                progress: 0.0,
+                speed: 3.5 + Math.random() * 1.5
+            });
+
+            if (Math.random() < 0.25) audio.playRifleShot();
+        }
+
+        function updateTracers(dt) {
+            for (let i = bulletTracers.length - 1; i >= 0; i--) {
+                const b = bulletTracers[i];
+                b.progress += dt * b.speed;
+
+                const head = b.from.clone().lerp(b.to, Math.min(1.0, b.progress));
+                const tail = b.from.clone().lerp(b.to, Math.max(0.0, b.progress - 0.15));
+
+                const posAttr = b.mesh.geometry.attributes.position;
+                posAttr.setXYZ(0, tail.x, tail.y, tail.z);
+                posAttr.setXYZ(1, head.x, head.y, head.z);
+                posAttr.needsUpdate = true;
+
+                if (b.progress >= 1.1) {
+                    scene.remove(b.mesh);
+                    bulletTracers.splice(i, 1);
+                }
+            }
+        }
+
+        function updateSoldiersAndFirefights(dt) {
+            // Animate Active Digging Sappers
+            sappers.forEach(s => {
+                s.digCycle += dt * 3.5;
+                const swing = Math.sin(s.digCycle);
+                if (s.mesh.shovel) {
+                    s.mesh.shovel.rotation.x = 0.5 + swing * 0.6;
+                }
+                // Dirt bursts when digging down
+                if (swing > 0.85 && Math.random() < 0.2) {
+                    createDirtBurst(s.mesh.position.x, s.baseY, s.mesh.position.z);
+                }
+            });
+
+            // Enemy Soldier Animation & Firing
+            enemySoldiers.forEach(e => {
+                if (!e.alive) return;
+                e.popTimer += dt;
+                e.mesh.position.y = e.baseY + Math.sin(e.popTimer * 2) * 0.8;
+
+                e.fireTimer -= dt;
+                if (e.fireTimer <= 0) {
+                    e.fireTimer = 2.5 + Math.random() * 4.0;
+                    if (friendlySoldiers.length > 0) {
+                        const targetF = friendlySoldiers[Math.floor(Math.random() * friendlySoldiers.length)];
+                        if (targetF && targetF.alive) spawnBulletTracer(e.mesh.position, targetF.mesh.position, true);
+                    }
+                }
+            });
+
+            // Friendly Infantry Firing
+            friendlySoldiers.forEach(f => {
+                if (!f.alive) return;
+                f.fireTimer -= dt;
+                if (f.fireTimer <= 0) {
+                    f.fireTimer = 3.0 + Math.random() * 4.0;
+                    const aliveEnemies = enemySoldiers.filter(e => e.alive);
+                    if (aliveEnemies.length > 0) {
+                        const targetE = aliveEnemies[Math.floor(Math.random() * aliveEnemies.length)];
+                        spawnBulletTracer(f.mesh.position, targetE.mesh.position, false);
+                    }
+                }
+            });
+        }
+
+        function createDirtBurst(x, y, z) {
+            const count = 6;
+            const geo = new THREE.BufferGeometry();
+            const positions = [];
+            const vels = [];
+            for (let i = 0; i < count; i++) {
+                positions.push(x, y + 0.2, z);
+                vels.push((Math.random() - 0.5) * 4, Math.random() * 5 + 2, (Math.random() - 0.5) * 4);
+            }
+            geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+            const theme = MAP_THEMES[STATE.selectedMap];
+            const mat = new THREE.PointsMaterial({ color: theme.dirtColor, size: 1.2, transparent: true, opacity: 0.8 });
+            const p = new THREE.Points(geo, mat);
+            scene.add(p);
+            particleSystems.push({ system: p, velocities: vels, life: 0.5 });
+        }
+
+        // ==========================================
+        // BALLISTICS & SHELL FIRING
+        // ==========================================
+        function fireShell() {
+            if (STATE.reloading || !STATE.gameActive) return;
+
+            STATE.reloading = true;
+            STATE.reloadProgress = 0.0;
+            audio.playCannonFire();
+
+            recoilGroup.position.z = 0.8;
+            triggerCameraShake(0.3);
+
+            const elevRad = (STATE.elevation * Math.PI) / 180;
+            const azRad = (STATE.azimuth * Math.PI) / 180;
+            const v0 = 110 + (STATE.powderCharge * 45);
+
+            // Vector pointing forward towards negative Z
+            const vx = Math.sin(azRad) * Math.cos(elevRad) * v0;
+            const vy = Math.sin(elevRad) * v0;
+            const vz = -Math.cos(azRad) * Math.cos(elevRad) * v0;
+
+            const shellMesh = new THREE.Mesh(
+                new THREE.CylinderGeometry(0.12, 0.12, 0.8, 8),
+                new THREE.MeshBasicMaterial({ color: 0xffaa00 })
+            );
+            shellMesh.geometry.rotateX(Math.PI / 2);
+
+            const muzzlePos = new THREE.Vector3(0, 0, -9.0);
+            muzzlePos.applyQuaternion(barrelGroup.quaternion);
+            muzzlePos.add(cannonGroup.position);
+            shellMesh.position.copy(muzzlePos);
+
+            scene.add(shellMesh);
+
+            STATE.activeShell = {
+                mesh: shellMesh,
+                pos: muzzlePos.clone(),
+                vel: new THREE.Vector3(vx, vy, vz),
+                type: STATE.shellType,
+                alive: true
+            };
+        }
+
+        function updateShell(dt) {
+            if (!STATE.activeShell || !STATE.activeShell.alive) return;
+
+            const shell = STATE.activeShell;
+
+            shell.vel.y -= CONFIG.gravity * dt * 10;
+            const windFx = Math.cos(STATE.wind.angle) * STATE.wind.speed * 0.3;
+            shell.vel.x += windFx * dt;
+
+            shell.pos.addScaledVector(shell.vel, dt);
+            shell.mesh.position.copy(shell.pos);
+
+            const lookTarget = shell.pos.clone().add(shell.vel);
+            shell.mesh.lookAt(lookTarget);
+
+            if (STATE.cameraMode === 'SHELL') {
+                const camOffset = shell.vel.clone().normalize().multiplyScalar(-12).add(new THREE.Vector3(0, 3.5, 0));
+                camera.position.copy(shell.pos).add(camOffset);
+                camera.lookAt(shell.pos);
+            }
+
+            const terrainY = getTerrainHeight(shell.pos.x, shell.pos.z);
+            if (shell.pos.y <= terrainY || shell.pos.z < -1200) {
+                triggerImpactExplosion(shell.pos.x, terrainY, shell.pos.z, shell.type);
+                scene.remove(shell.mesh);
+                shell.alive = false;
+                STATE.activeShell = null;
+
+                if (STATE.cameraMode === 'SHELL') setCameraMode(STATE.cameraMode);
+            }
+        }
+
+        function triggerImpactExplosion(x, y, z, type) {
+            const radius = type === 'HE' ? 24 : 14;
+            audio.playExplosion();
+
+            createExplosionParticles(x, y, z);
+
+            // Targets
+            targets.forEach(t => {
+                if (t.destroyed) return;
+                const dist = Math.hypot(t.mesh.position.x - x, t.mesh.position.z - z);
+                if (dist <= radius) {
+                    t.hp--;
+                    if (t.hp <= 0) {
+                        t.destroyed = true;
+                        STATE.targetsRemaining--;
+                        STATE.score += 200;
+                        t.mesh.position.y -= 2.5;
+                    }
+                }
+            });
+
+            // Friendly Casualties
+            friendlySoldiers.forEach(f => {
+                if (!f.alive) return;
+                const dist = Math.hypot(f.mesh.position.x - x, f.mesh.position.z - z);
+                if (dist <= radius * 0.7) {
+                    f.alive = false;
+                    scene.remove(f.mesh);
+                    STATE.friendlyCasualties++;
+                    STATE.score = Math.max(0, STATE.score - 300);
+                }
+            });
+
+            // Enemy Casualties
+            enemySoldiers.forEach(e => {
+                if (!e.alive) return;
+                const dist = Math.hypot(e.mesh.position.x - x, e.mesh.position.z - z);
+                if (dist <= radius) {
+                    e.alive = false;
+                    scene.remove(e.mesh);
+                    STATE.score += 50;
+                }
+            });
+
+            updateHUD();
+
+            if (STATE.targetsRemaining <= 0) {
+                setTimeout(() => levelCompleted(), 1000);
+            }
+        }
+
+        function createExplosionParticles(x, y, z) {
+            const count = 45;
+            const geo = new THREE.BufferGeometry();
+            const positions = [];
+            const velocities = [];
+
+            for (let i = 0; i < count; i++) {
+                positions.push(x, y + 1, z);
+                velocities.push(
+                    (Math.random() - 0.5) * 22,
+                    Math.random() * 16 + 5,
+                    (Math.random() - 0.5) * 22
+                );
+            }
+
+            geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+            const mat = new THREE.PointsMaterial({ color: 0xff7700, size: 2.2, transparent: true, opacity: 0.95 });
+            const pSystem = new THREE.Points(geo, mat);
+            scene.add(pSystem);
+
+            particleSystems.push({ system: pSystem, velocities: velocities, life: 1.0 });
+        }
+
+        function updateParticles(dt) {
+            for (let i = particleSystems.length - 1; i >= 0; i--) {
+                const ps = particleSystems[i];
+                ps.life -= dt * 1.5;
+                ps.system.material.opacity = ps.life;
+
+                const posAttr = ps.system.geometry.attributes.position;
+                for (let j = 0; j < posAttr.count; j++) {
+                    let px = posAttr.getX(j) + ps.velocities[j * 3] * dt;
+                    let py = posAttr.getY(j) + ps.velocities[j * 3 + 1] * dt;
+                    let pz = posAttr.getZ(j) + ps.velocities[j * 3 + 2] * dt;
+                    posAttr.setXYZ(j, px, py, pz);
+                }
+                posAttr.needsUpdate = true;
+
+                if (ps.life <= 0) {
+                    scene.remove(ps.system);
+                    particleSystems.splice(i, 1);
+                }
+            }
+        }
+
+        let shakeIntensity = 0;
+        function triggerCameraShake(amt) { shakeIntensity = amt; }
+        function applyCameraShake() {
+            if (shakeIntensity > 0) {
+                camera.position.x += (Math.random() - 0.5) * shakeIntensity;
+                camera.position.y += (Math.random() - 0.5) * shakeIntensity;
+                shakeIntensity -= 0.02;
+            }
+        }
+
+        // ==========================================
+        // UI BINDINGS & CONTROLS
+        // ==========================================
+        function setupUI() {
+            const sliderElev = document.getElementById('slider-elevation');
+            const sliderAz = document.getElementById('slider-azimuth');
+
+            sliderElev.oninput = (e) => { STATE.elevation = parseFloat(e.target.value); updateGunAngle(); };
+            sliderAz.oninput = (e) => { STATE.azimuth = parseFloat(e.target.value); updateGunAngle(); };
+
+            document.getElementById('btn-elev-up').onclick = () => { STATE.elevation = Math.min(CONFIG.maxElevation, STATE.elevation + 1.0); sliderElev.value = STATE.elevation; updateGunAngle(); };
+            document.getElementById('btn-elev-down').onclick = () => { STATE.elevation = Math.max(CONFIG.minElevation, STATE.elevation - 1.0); sliderElev.value = STATE.elevation; updateGunAngle(); };
+            document.getElementById('btn-az-left').onclick = () => { STATE.azimuth = Math.max(CONFIG.minAzimuth, STATE.azimuth - 1.0); sliderAz.value = STATE.azimuth; updateGunAngle(); };
+            document.getElementById('btn-az-right').onclick = () => { STATE.azimuth = Math.min(CONFIG.maxAzimuth, STATE.azimuth + 1.0); sliderAz.value = STATE.azimuth; updateGunAngle(); };
+
+            document.querySelectorAll('.btn-map').forEach(btn => {
+                btn.onclick = () => {
+                    const mapKey = btn.dataset.map;
+                    document.querySelectorAll('.btn-map').forEach(b => { b.classList.remove('text-amber-400', 'border-amber-500'); b.classList.add('text-gray-300', 'border-gray-600'); });
+                    btn.classList.add('text-amber-400', 'border-amber-500');
+                    applyMapTheme(mapKey);
+                    setupLevel(STATE.level);
+                    audio.playClick();
+                };
+            });
+
+            document.querySelectorAll('.btn-charge').forEach(btn => {
+                btn.onclick = () => {
+                    STATE.powderCharge = parseInt(btn.dataset.charge);
+                    document.querySelectorAll('.btn-charge').forEach(b => { b.classList.remove('text-amber-400', 'border-amber-500'); b.classList.add('text-gray-300'); });
+                    btn.classList.add('text-amber-400', 'border-amber-500');
+                    audio.playClick();
+                };
+            });
+
+            document.querySelectorAll('.btn-shell').forEach(btn => {
+                btn.onclick = () => {
+                    STATE.shellType = btn.dataset.type;
+                    document.querySelectorAll('.btn-shell').forEach(b => { b.classList.remove('text-amber-400', 'border-amber-500'); b.classList.add('text-gray-300', 'border-gray-600'); });
+                    btn.classList.add('text-amber-400', 'border-amber-500');
+                    audio.playClick();
+                };
+            });
+
+            document.getElementById('btn-fire').onclick = fireShell;
+            document.getElementById('btn-toggle-cam').onclick = () => {
+                if (STATE.cameraMode === 'GUNNER') setCameraMode('OPTICS');
+                else if (STATE.cameraMode === 'OPTICS') setCameraMode('SHELL');
+                else setCameraMode('GUNNER');
+            };
+
+            window.onkeydown = (e) => {
+                if (!STATE.gameActive) return;
+                if (e.key === 'w' || e.key === 'W' || e.key === 'ArrowUp') { STATE.elevation = Math.min(CONFIG.maxElevation, STATE.elevation + 0.5); sliderElev.value = STATE.elevation; updateGunAngle(); }
+                else if (e.key === 's' || e.key === 'S' || e.key === 'ArrowDown') { STATE.elevation = Math.max(CONFIG.minElevation, STATE.elevation - 0.5); sliderElev.value = STATE.elevation; updateGunAngle(); }
+                else if (e.key === 'a' || e.key === 'A' || e.key === 'ArrowLeft') { STATE.azimuth = Math.max(CONFIG.minAzimuth, STATE.azimuth - 0.5); sliderAz.value = STATE.azimuth; updateGunAngle(); }
+                else if (e.key === 'd' || e.key === 'D' || e.key === 'ArrowRight') { STATE.azimuth = Math.min(CONFIG.maxAzimuth, STATE.azimuth + 0.5); sliderAz.value = STATE.azimuth; updateGunAngle(); }
+                else if (e.key === ' ') { fireShell(); }
+                else if (e.key === 'v' || e.key === 'V') { setCameraMode(STATE.cameraMode === 'OPTICS' ? 'GUNNER' : 'OPTICS'); }
+                else if (e.key === 'c' || e.key === 'C') { setCameraMode(STATE.cameraMode === 'SHELL' ? 'GUNNER' : 'SHELL'); }
+            };
+
+            document.getElementById('btn-modal-action').onclick = () => {
+                audio.init();
+                document.getElementById('modal-overlay').classList.add('hidden');
+                STATE.gameActive = true;
+                setupLevel(STATE.level);
+            };
+        }
+
+        function setCameraMode(mode) {
+            STATE.cameraMode = mode;
+            const scopeOverlay = document.getElementById('scope-overlay');
+            const modeText = document.getElementById('cam-mode-text');
+
+            if (mode === 'GUNNER') {
+                camera.fov = 60;
+                camera.position.copy(cameraGunnerPos);
+                camera.lookAt(0, 2.0, -100);
+                scopeOverlay.style.opacity = '0';
+                modeText.innerText = 'GUNNER';
+            } else if (mode === 'OPTICS') {
+                camera.fov = 18;
+                camera.position.copy(cameraOpticsPos);
+                updateGunAngle();
+                scopeOverlay.style.opacity = '1';
+                modeText.innerText = 'OPTICS SIGHT';
+            } else if (mode === 'SHELL') {
+                camera.fov = 50;
+                scopeOverlay.style.opacity = '0';
+                modeText.innerText = 'TRACER CAM';
+            }
+            camera.updateProjectionMatrix();
+        }
+
+        function updateGunAngle() {
+            barrelGroup.rotation.y = (-STATE.azimuth * Math.PI) / 180;
+            recoilGroup.rotation.x = (STATE.elevation * Math.PI) / 180;
+
+            // Align Gunner view to tilt slightly with elevation while looking over the barrel
+            if (STATE.cameraMode === 'GUNNER') {
+                const elevRad = (STATE.elevation * Math.PI) / 180;
+                const azRad = (STATE.azimuth * Math.PI) / 180;
+                const targetX = Math.sin(azRad) * 100;
+                const targetY = 2.0 + Math.sin(elevRad) * 20;
+                const targetZ = -Math.cos(azRad) * 100;
+                camera.position.copy(cameraGunnerPos);
+                camera.lookAt(targetX, targetY, targetZ);
+            }
+
+            // Align Optics camera vector towards negative Z downrange
+            if (STATE.cameraMode === 'OPTICS') {
+                const elevRad = (STATE.elevation * Math.PI) / 180;
+                const azRad = (STATE.azimuth * Math.PI) / 180;
+                const dist = 300;
+
+                const targetX = cameraOpticsPos.x + Math.sin(azRad) * Math.cos(elevRad) * dist;
+                const targetY = cameraOpticsPos.y + Math.sin(elevRad) * dist;
+                const targetZ = cameraOpticsPos.z - Math.cos(azRad) * Math.cos(elevRad) * dist;
+
+                camera.position.copy(cameraOpticsPos);
+                camera.lookAt(targetX, targetY, targetZ);
+            }
+
+            updateHUD();
+        }
+
+        function updateHUD() {
+            document.getElementById('readout-elevation').innerText = STATE.elevation.toFixed(1) + '°';
+            document.getElementById('readout-azimuth').innerText = STATE.azimuth.toFixed(1) + '°';
+            document.getElementById('score-display').innerText = STATE.score.toString().padStart(4, '0');
+
+            const bearing = (360 + Math.round(STATE.azimuth)) % 360;
+            document.getElementById('compass-tape').innerText = `${bearing.toString().padStart(3, '0')}° N`;
+
+            const destroyed = STATE.totalTargets - STATE.targetsRemaining;
+            document.getElementById('targets-count').innerText = `${destroyed} / ${STATE.totalTargets}`;
+            document.getElementById('target-progress').style.width = `${(destroyed / STATE.totalTargets) * 100}%`;
+            document.getElementById('friendly-cas').innerText = STATE.friendlyCasualties;
+        }
+
+        // ==========================================
+        // GAME LOOP
+        // ==========================================
+        let lastTime = performance.now();
+
+        function animate() {
+            requestAnimationFrame(animate);
+
+            const now = performance.now();
+            const dt = Math.min((now - lastTime) / 1000, 0.1);
+            lastTime = now;
+
+            if (STATE.gameActive) {
+                if (STATE.reloading) {
+                    STATE.reloadProgress += dt / CONFIG.reloadTime;
+                    document.getElementById('reload-bar').style.width = `${Math.min(100, STATE.reloadProgress * 100)}%`;
+                    if (STATE.reloadProgress >= 1.0) STATE.reloading = false;
+                }
+
+                if (recoilGroup.position.z > 0) recoilGroup.position.z = Math.max(0, recoilGroup.position.z - dt * 3.0);
+
+                updateShell(dt);
+                updateTracers(dt);
+                updateSoldiersAndFirefights(dt);
+                updateParticles(dt);
+                updateWeather(dt);
+                applyCameraShake();
+            }
+
+            renderer.render(scene, camera);
+        }
+
+        setInterval(() => {
+            if (!STATE.gameActive) return;
+            STATE.timeRemaining--;
+            const m = Math.floor(STATE.timeRemaining / 60).toString().padStart(2, '0');
+            const s = (STATE.timeRemaining % 60).toString().padStart(2, '0');
+            document.getElementById('game-time').innerText = `${m}:${s}`;
+
+            if (STATE.timeRemaining <= 0) gameOver("TIME EXPIRED");
+        }, 1000);
+
+        function levelCompleted() {
+            STATE.gameActive = false;
+            const modal = document.getElementById('modal-overlay');
+            const title = document.getElementById('modal-title');
+            const desc = document.getElementById('modal-body');
+            const btn = document.getElementById('btn-modal-action');
+
+            if (STATE.level < LEVELS.length) {
+                title.innerText = "SECTOR CLEARED!";
+                desc.innerHTML = `<p>All targets in Sector ${STATE.level} neutralized!</p><p class="text-amber-400 font-bold mt-2">Score: ${STATE.score}</p>`;
+                btn.innerText = "PROCEED TO NEXT LEVEL";
+
+                STATE.level++;
+                btn.onclick = () => {
+                    modal.classList.add('hidden');
+                    STATE.gameActive = true;
+                    setupLevel(STATE.level);
+                    const lvl = LEVELS[STATE.level - 1];
+                    document.getElementById('level-title').innerText = lvl.title;
+                    document.getElementById('level-desc').innerText = lvl.desc;
+                };
+            } else {
+                title.innerText = "CAMPAIGN VICTORY";
+                desc.innerHTML = `<p>Enemy battalion routed!</p><p class="text-amber-400 font-bold text-lg mt-2">FINAL SCORE: ${STATE.score}</p>`;
+                btn.innerText = "REPLAY CAMPAIGN";
+                btn.onclick = () => { STATE.level = 1; STATE.score = 0; modal.classList.add('hidden'); STATE.gameActive = true; setupLevel(1); };
+            }
+            modal.classList.remove('hidden');
+        }
+
+        function gameOver(reason) {
+            STATE.gameActive = false;
+            const modal = document.getElementById('modal-overlay');
+            document.getElementById('modal-title').innerText = "MISSION FAILED";
+            document.getElementById('modal-body').innerHTML = `<p class="text-red-400 font-bold">${reason}</p>`;
+            const btn = document.getElementById('btn-modal-action');
+            btn.innerText = "RETRY";
+            btn.onclick = () => { modal.classList.add('hidden'); STATE.gameActive = true; setupLevel(STATE.level); };
+            modal.classList.remove('hidden');
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        window.onload = () => {
+            initThreeJS();
+            setupUI();
+            updateGunAngle();
+            animate();
+        };
+    </script>
+</body>
+</html>
